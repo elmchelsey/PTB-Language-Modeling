@@ -8,6 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 import nltk
 from nltk.tokenize import word_tokenize
+from collections import defaultdict
 
 nltk.download('punkt_tab')
 
@@ -44,10 +45,21 @@ def preprocess_text(text, glove_embeddings, unknown_token='UNK', stopwords=None)
 
     return embedding_sequence
 
+def build_vocab(sentences, special_tokens=['<PAD>', '<UNK>']):
+    vocab = defaultdict(lambda: len(vocab))
+    for token in special_tokens:
+        vocab[token]
+    for sentence in sentences:
+        tokens = word_tokenize(sentence.lower())
+        for token in tokens:
+            _ = vocab[token]
+    return dict(vocab)
+
 class TextDataset(Dataset):
-    def __init__(self, text_data, glove_embeddings):
+    def __init__(self, text_data, vocab, tokenizer):
         self.text_data = text_data
-        self.glove_embeddings = glove_embeddings
+        self.vocab = vocab
+        self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.text_data)
@@ -55,8 +67,9 @@ class TextDataset(Dataset):
     def __getitem__(self, idx):
         item = self.text_data[idx]
         text = item['sentence']
-        embedding_sequence = preprocess_text(text, self.glove_embeddings)
-        return torch.tensor(embedding_sequence, dtype=torch.float32)
+        tokens = self.tokenizer(text.lower())
+        token_indices = [self.vocab.get(token, self.vocab['<UNK>']) for token in tokens]
+        return torch.tensor(token_indices, dtype=torch.long)
     
 def collate_fn(batch):
     sequences = [item for item in batch]     # Extract sequences
@@ -95,15 +108,17 @@ class TransformerLM(nn.Module):
         
         # Output layer
         self.fc_out = nn.Linear(d_model, vocab_size)
-        self.vocab_size = vocab_size
 
-    def forward(self, x):   # x: (batch, seq_len)
+    def forward(self, x, mask=None):   # x: (batch, seq_len)
         # Embedding and positional encoding
         x = self.embedding(x)   # (batch, seq_len, d_model)
         x = self.pos_encoding(x)  # (batch, seq_len, d_model)
 
-        mask = nn.Transformer.generate_square_subsequent_mask(x.size(1)).to(x.device)   # (seq_len, seq_len)
-        out = self.transformer_encoder(x, mask=mask)    # (batch, seq_len, d_model)
+        # Fix: Create padding mask correctly and transpose it
+        padding_mask = x[:, :, 0].eq(0).transpose(0, 1)  # Add transpose(0, 1)
+        
+        out = self.transformer_encoder(x, src_key_padding_mask=padding_mask)    # (batch, seq_len, d_model)
+        out = self.fc_out(out)
         
         return out
     
@@ -129,8 +144,10 @@ if __name__ == '__main__':
     glove_path = 'glove.twitter.27B.25d.txt'
     glove_embeddings = load_glove_embeddings(glove_path)
 
-    dataset = TextDataset(train, glove_embeddings)
-    dataloader = DataLoader(dataset, batch_size=32, collate_fn=collate_fn)
+    vocab = build_vocab([item['sentence'] for item in train])
+
+    dataset = TextDataset(train, vocab, word_tokenize)
+    dataloader = DataLoader(dataset, batch_size=2, collate_fn=collate_fn)
 
     input_dim = len(glove_embeddings)
     model_dim = 100
@@ -152,7 +169,7 @@ if __name__ == '__main__':
             batch = batch.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
             optimizer.zero_grad()
             output = model(batch)
-            loss = criterion(output.view(-1, output.shape[-1], batch.view(-1)))
+            loss = criterion(output.view(-1, output.shape[-1]), batch.view(-1))
 
             loss.backward()
             optimizer.step()
