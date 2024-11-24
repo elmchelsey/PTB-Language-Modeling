@@ -78,8 +78,8 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Text Files
-*.txt
+# Text files
+glove.twitter.27B.25d.txt
 
 # IPython
 profile_default/
