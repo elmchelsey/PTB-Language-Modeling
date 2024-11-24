@@ -79,7 +79,7 @@ target/
 .ipynb_checkpoints
 
 # Text files
-*.txt
+glove.twitter.27B.25d.txt
 
 # IPython
 profile_default/
