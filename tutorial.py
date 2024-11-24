@@ -13,6 +13,7 @@ from nltk.tokenize import word_tokenize
 from collections import defaultdict
 from datasets import load_dataset
 import torch.nn.functional as F
+import argparse
 
 nltk.download('punkt_tab')
 
@@ -209,65 +210,65 @@ Multi Head Attention
 """
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, d_model:int, h:int, dropout:float):  # h is the number of heads
+    def __init__(self, d_model:int, h:int, dropout:float):
         super().__init__()
         self.d_model = d_model
         self.h = h
-        self.dropout = nn.Dropout(dropout)
-
-        # d_model must be divisible by h, so that the embedding space can be split into 
-        # equal parts for each head
-        assert d_model % h == 0, 'd_model is not divisible by h'
-
-        # d_k is the dimension of each head
+        assert d_model % h == 0, 'd_model must be divisible by h'
         self.d_k = d_model // h
-
-        # define the linear transformations for q, k, v
-        self.w_q = nn.Linear(d_model, d_model)    # Wq
-        self.w_k = nn.Linear(d_model, d_model)    # Wk
-        self.w_v = nn.Linear(d_model, d_model)    # Wv
-
-        self.w_o = nn.Linear(d_model, d_model)    # Wo
+        
+        self.w_q = nn.Linear(d_model, d_model)
+        self.w_k = nn.Linear(d_model, d_model)
+        self.w_v = nn.Linear(d_model, d_model)
+        self.w_o = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
 
     @staticmethod
     def attention(query, key, value, mask, dropout: nn.Dropout):
         d_k = query.shape[-1]
-
+        
         # Compute attention scores
-        # (batch_size, h, d_k, seq_len) -> (batch_size, h, seq_len, seq_len)
         attention_scores = (query @ key.transpose(-2, -1)) / math.sqrt(d_k)
         
         if mask is not None:
-            # Mask out the attention scores for word tokens that should not be attended to
-            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
-        attention_scores = attention_scores.softmax(dim=-1) # (batch_size, h, seq_len, seq_len)
-
+            # Adjust mask shape to match attention_scores
+            if mask.dim() == 3:
+                # If mask is (batch_size, seq_len, seq_len)
+                mask = mask.unsqueeze(1)
+            
+            # Ensure mask matches the attention scores size exactly
+            if mask.size(-1) != attention_scores.size(-1):
+                # Truncate or pad mask if necessary
+                mask = mask[..., :attention_scores.size(-1), :attention_scores.size(-1)]
+            
+            attention_scores = attention_scores.masked_fill(~mask, float('-inf'))
+        
+        attention_scores = attention_scores.softmax(dim=-1)
+        
         if dropout is not None:
             attention_scores = dropout(attention_scores)
-
-        # Multiply the attention scores by the value matrix
-        return (attention_scores @ value), attention_scores  # (batch_size, h, seq_len, d_k), (batch_size, h, seq_len, seq_len)
+        
+        return (attention_scores @ value), attention_scores
 
     def forward(self, q, k, v, mask=None):
-        query = self.w_q(q) # Q' (batch_size, seq_len, d_model)
-        key = self.w_k(k)   # K' (batch_size, seq_len, d_model)
-        value = self.w_v(v) # V' (batch_size, seq_len, d_model)
-
-        # split into h heads
-        # (batch_size, seq_len, d_model) -> (batch_size, seq_len, h, d_k) -> (batch_size, h, seq_len, d_k)
-        query = query.view(query.shape[0], query.shape[1], self.h, self.d_k).transpose(1,2) # (batch_size, h, seq_len, d_k)
-        key = key.view(key.shape[0], key.shape[1], self.h, self.d_k).transpose(1, 2)       # (batch_size, h, seq_len, d_k)
-        value = value.view(value.shape[0], value.shape[1], self.h, self.d_k).transpose(1, 2) # (batch_size, h, seq_len, d_k)
-
-        # Return the output of the attention mechanism and the attention scores
-        x, self.attention_scores = MultiHeadAttention.attention(query, key, value, mask, self.dropout)
-
-        # Concatenate the results from all heads: (batch_size, seq_len, d_model) -> (batch_size, seq_len, d_model)
-        x = x.transpose(1, 2).contiguous().view(x.shape[0], -1, self.d_model)
-
-        # Apply the output linear transformation
-        return self.w_o(x) # (batch_size, seq_len, d_model)
+        batch_size = q.size(0)
+        
+        # Linear transformations
+        query = self.w_q(q)
+        key = self.w_k(k)
+        value = self.w_v(v)
+        
+        # Reshape for multi-head attention
+        query = query.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
+        key = key.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
+        value = value.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
+        
+        # Apply attention
+        x, self.attention_scores = self.attention(query, key, value, mask, self.dropout)
+        
+        # Reshape and apply final linear transformation
+        x = x.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        return self.w_o(x)
 
 """
 Residual Connection
@@ -349,6 +350,11 @@ class DecoderBlock(nn.Module):
         self.residual_connections = nn.ModuleList([ResidualConnection(d_model, dropout) for _ in range(3)])
 
     def forward(self, x, enc_output, src_mask, tgt_mask):
+        # Ensure tgt_mask has correct shape before passing to self-attention
+        batch_size = x.size(0)
+        if tgt_mask.dim() == 3:
+            tgt_mask = tgt_mask.unsqueeze(1)
+        
         x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, tgt_mask))
         x = self.residual_connections[1](x, lambda x: self.cross_attention_block(x, enc_output, enc_output, src_mask))
         x = self.residual_connections[2](x, self.feed_forward_block)
@@ -481,6 +487,29 @@ def build_transformer(src_vocab_size:int, tgt_vocab_size:int, d_model:int = 512,
 
     return transformer
 
+def generate_target_mask(tgt_input, device):
+    """
+    Generate mask for target sequence.
+    Args:
+        tgt_input: Target input tensor of shape (batch_size, seq_len)
+        device: Device to create tensor on
+    Returns:
+        Combined mask tensor of shape (batch_size, seq_len, seq_len)
+    """
+    batch_size, seq_len = tgt_input.size()
+    
+    # Create padding mask (batch_size, seq_len, seq_len)
+    padding_mask = (tgt_input != 0).unsqueeze(1).expand(batch_size, seq_len, seq_len)
+    
+    # Create causal mask (seq_len, seq_len)
+    causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1).bool()
+    causal_mask = causal_mask.expand(batch_size, seq_len, seq_len)
+    
+    # Combine masks
+    final_mask = (~causal_mask & padding_mask)
+    
+    return final_mask.to(device)
+
 def train_transformer(model, train_dataloader, val_dataloader, num_epochs, learning_rate, device):
     """
     Trains the transformer model.
@@ -505,40 +534,51 @@ def train_transformer(model, train_dataloader, val_dataloader, num_epochs, learn
         total_loss = 0
         
         for batch_idx, batch in enumerate(train_dataloader):
-            # Get source and target sequences
-            src = batch['source'].to(device)
-            tgt = batch['target'].to(device)
+            try:
+                src = batch['source'].to(device)
+                tgt = batch['target'].to(device)
+                
+                # Create source mask
+                src_mask = (src != 0).unsqueeze(1).unsqueeze(2).to(device)
+                
+                # Create target input (remove last token)
+                tgt_input = tgt[:, :-1]
+                
+                # Create target mask
+                tgt_mask = generate_target_mask(tgt_input, device)
+                
+                # Forward pass
+                optimizer.zero_grad()
+                
+                enc_output = model.encode(src, src_mask)
+                dec_output = model.decode(tgt_input, enc_output, src_mask, tgt_mask)
+                output = model.project(dec_output)
+                
+                # Calculate loss
+                loss = criterion(output.contiguous().view(-1, output.size(-1)), 
+                               tgt[:, 1:].contiguous().view(-1))
+                
+                # Backward pass
+                loss.backward()
+                
+                # Clip gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                # Update weights
+                optimizer.step()
+                
+                total_loss += loss.item()
+                
+                if batch_idx % 100 == 0:
+                    print(f'Epoch: {epoch+1}, Batch: {batch_idx}, Loss: {loss.item():.4f}')
+                    
+            except RuntimeError as e:
+                print(f"Error in batch {batch_idx}:")
+                print(f"Source shape: {src.shape}")
+                print(f"Target shape: {tgt.shape}")
+                print(f"Target mask shape: {tgt_mask.shape}")
+                raise e
             
-            # Create masks
-            src_mask = (src != 0).unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1, src_len)
-            tgt_mask = generate_square_subsequent_mask(tgt[:, :-1].size(1)).to(device)
-            
-            # Forward pass
-            optimizer.zero_grad()
-            
-            # Get model outputs
-            enc_output = model.encode(src, src_mask)
-            dec_output = model.decode(tgt[:, :-1], enc_output, src_mask, tgt_mask)
-            output = model.project(dec_output)
-            
-            # Calculate loss
-            loss = criterion(output.contiguous().view(-1, output.size(-1)), 
-                           tgt[:, 1:].contiguous().view(-1))
-            
-            # Backward pass
-            loss.backward()
-            
-            # Clip gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            # Update weights
-            optimizer.step()
-            
-            total_loss += loss.item()
-            
-            if batch_idx % 100 == 0:
-                print(f'Epoch: {epoch+1}, Batch: {batch_idx}, Loss: {loss.item():.4f}')
-        
         avg_loss = total_loss / len(train_dataloader)
         print(f'Epoch: {epoch+1}, Average Loss: {avg_loss:.4f}')
         
@@ -566,13 +606,12 @@ def train_transformer(model, train_dataloader, val_dataloader, num_epochs, learn
 
 def generate_square_subsequent_mask(sz):
     """
-    Generates a square mask for the sequence. The mask ensures that the
-    predictions for position i can depend only on the known outputs at 
-    positions less than i.
+    Generate a square mask for the sequence. The mask ensures that the
+    prediction for position i can depend only on known outputs at positions
+    less than i.
     """
-    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-    return mask
+    mask = torch.triu(torch.ones((sz, sz)), diagonal=1).type(torch.bool)
+    return ~mask
 
 class PTBDataset(Dataset):
     def __init__(self, data, vocab, max_len=128):
@@ -675,44 +714,75 @@ def calculate_and_save_perplexities(model, test_dataloader, device, output_file)
                         # Write to file
                         f.write(f"{sentence_idx}\t{perplexity:.4f}\n")
 
-# Prepare the data
-special_tokens = ['<PAD>', '<UNK>', '<START>', '<END>']
-vocab = build_vocab([item['sentence'] for item in train], special_tokens=special_tokens)
+# Add this near the top of the file, after imports
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train a Transformer model on PTB dataset')
+    
+    # Model parameters
+    parser.add_argument('--d_model', type=int, default=512, help='Dimension of the model')
+    parser.add_argument('--h', type=int, default=8, help='Number of attention heads')
+    parser.add_argument('--N', type=int, default=6, help='Number of encoder/decoder layers')
+    parser.add_argument('--d_ff', type=int, default=2048, help='Dimension of feed forward network')
+    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    
+    # Training parameters
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--num_epochs', type=int, default=2, help='Number of epochs')
+    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
+    parser.add_argument('--max_len', type=int, default=128, help='Maximum sequence length')
+    
+    # Other parameters
+    parser.add_argument('--output_file', type=str, default='sentence_perplexities.txt', 
+                        help='Output file for perplexities')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                        help='Device to use (cuda/cpu)')
+    
+    return parser.parse_args()
 
-# Create datasets
-train_dataset = PTBDataset(train, vocab)
-val_dataset = PTBDataset(val, vocab)
+# Replace the main execution code at the bottom with this:
+def main():
+    # Parse command line arguments
+    args = parse_args()
+    
+    # Prepare the data
+    special_tokens = ['<PAD>', '<UNK>', '<START>', '<END>']
+    vocab = build_vocab([item['sentence'] for item in train], special_tokens=special_tokens)
+    
+    # Create datasets
+    train_dataset = PTBDataset(train, vocab, max_len=args.max_len)
+    val_dataset = PTBDataset(val, vocab, max_len=args.max_len)
+    
+    # Create dataloaders
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, 
+                                shuffle=True, collate_fn=collate_fn)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, 
+                              shuffle=False, collate_fn=collate_fn)
+    
+    # Initialize the model
+    vocab_size = len(vocab)
+    model = build_transformer(
+        src_vocab_size=vocab_size,
+        tgt_vocab_size=vocab_size,
+        d_model=args.d_model,
+        h=args.h,
+        N=args.N,
+        d_ff=args.d_ff,
+        dropout=args.dropout
+    )
+    
+    # Train the model
+    device = torch.device(args.device)
+    train_transformer(model, train_dataloader, val_dataloader, 
+                     args.num_epochs, args.learning_rate, device)
+    
+    # Create test dataset and dataloader
+    test_dataset = PTBDataset(test, vocab, max_len=args.max_len)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, 
+                               shuffle=False, collate_fn=collate_fn)
+    
+    # Calculate and save perplexities
+    calculate_and_save_perplexities(model, test_dataloader, device, args.output_file)
+    print(f"Perplexities have been saved to {args.output_file}")
 
-# Create dataloaders
-batch_size = 32
-train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-
-# Initialize the model
-vocab_size = len(vocab)
-model = build_transformer(
-    src_vocab_size=vocab_size,
-    tgt_vocab_size=vocab_size,
-    d_model=512,
-    h=8,
-    N=6,
-    d_ff=2048,
-    dropout=0.1
-)
-
-# Training parameters
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-num_epochs = 2
-learning_rate = 0.0001
-
-# Train the model
-train_transformer(model, train_dataloader, val_dataloader, num_epochs, learning_rate, device)
-
-# Create test dataset and dataloader (use batch_size=1 for easier sentence tracking)
-test_dataset = PTBDataset(test, vocab)
-test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
-
-# Calculate and save perplexities
-output_file = "sentence_perplexities.txt"
-calculate_and_save_perplexities(model, test_dataloader, device, output_file)
-print(f"Perplexities have been saved to {output_file}")
+if __name__ == '__main__':
+    main()
