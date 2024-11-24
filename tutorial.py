@@ -74,11 +74,87 @@ class LayerNormalization(nn.Module):
 Feed Forward
     Implements the feed-forward network for the transformer model.
     Two fully connected layers with a ReLU activation function in between.
+
+    The input sentence with dimension (batch_size, seq_len, d_model) is converted
+    to a tensor of size (batch_size, seq_len, d_ff), then back to (batch_size, 
+    seq_len, d_model).
 """
 class FeedForward(nn.Module):
     def __init__(self, d_model:int, d_ff:int, dropout:float):
         super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_ff)
+        self.linear_1 = nn.Linear(d_model, d_ff)    # W1 and B1
         self.relu = nn.ReLU()
-        self.linear_2 = nn.Linear(d_ff, d_model)
+        self.linear_2 = nn.Linear(d_ff, d_model)    # W2 and B2
         self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # (batch_size, seq_len, d_model) -> (batch_size, seq_len, d_ff) -> (batch_size, seq_len, d_model)
+        return self.linear_2(self.dropout(self.relu(self.linear_1(x))))
+
+"""
+Multi Head Attention
+    Implements the multi-head attention mechanism. Split in the embedding space,
+    not the sequence dimension, so that each head has access to the full sentence, but 
+    a different part of the embedding for each word.
+
+    Applies attention to each head by softmaxing over the dot product of the query
+    and key, then concatenates the results.
+"""
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model:int, h:int, dropout:float):  # h is the number of heads
+        super().__init__()
+        self.d_model = d_model
+        self.h = h
+        self.dropout = nn.Dropout(dropout)
+
+        # d_model must be divisible by h, so that the embedding space can be split into 
+        # equal parts for each head
+        assert d_model % h == 0, 'd_model is not divisible by h'
+
+        # d_k is the dimension of each head
+        self.d_k = d_model // h
+
+        # define the linear transformations for q, k, v
+        self.w_q = nn.Linear(d_model, d_model)    # Wq
+        self.w_k = nn.Linear(d_model, d_model)    # Wk
+        self.w_v = nn.Linear(d_model, d_model)    # Wv
+
+        self.w_o = nn.Linear(d_model, d_model)    # Wo
+        self.dropout = nn.Dropout(dropout)
+
+    @staticmethod
+    def attention(query, key, value, mask, dropout: nn.Dropout):
+        d_k = query.shape[-1]
+
+        # Compute attention scores
+        # (batch_size, h, d_k, seq_len) -> (batch_size, h, seq_len, seq_len)
+        attention_scores = (query @ key.transpose(-2, -1)) / math.sqrt(d_k)
+        
+        if mask is not None:
+            # Mask out the attention scores for word tokens that should not be attended to
+            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
+        attention_scores = attention_scores.softmax(dim=-1) # (batch_size, h, seq_len, seq_len)
+
+        if dropout is not None:
+            attention_scores = dropout(attention_scores)
+
+        # Multiply the attention scores by the value matrix
+        return (attention_scores @ value), attention_scores  # (batch_size, h, seq_len, d_k), (batch_size, h, seq_len, seq_len)
+
+
+
+    def forward(self, q, k, v, mask=None):
+        query = self.w_q(q) # Q' (batch_size, seq_len, d_model)
+        key = self.w_k(k)   # K' (batch_size, seq_len, d_model)
+        value = self.w_v(v) # V' (batch_size, seq_len, d_model)
+
+        # split into h heads
+        # (batch_size, seq_len, d_model) -> (batch_size, seq_len, h, d_k) -> (batch_size, h, seq_len, d_k)
+        query = query.view(query.shape[0], query.shape[1], self.h, self.d_k).transpose(1,2) # (batch_size, h, seq_len, d_k)
+        key = key.view(key.shape[0], key.shape[1], self.h, self.d_k).transpose(1, 2)       # (batch_size, h, seq_len, d_k)
+        value = value.view(value.shape[0], value.shape[1], self.h, self.d_k).transpose(1, 2) # (batch_size, h, seq_len, d_k)
+
+        # Return the output of the attention mechanism and the attention scores
+        x, self.attention_scores = MultiHeadAttention.attention(query, key, value, mask, self.dropout)
+
+        
