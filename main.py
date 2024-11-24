@@ -147,7 +147,7 @@ if __name__ == '__main__':
     vocab = build_vocab([item['sentence'] for item in train])
 
     dataset = TextDataset(train, vocab, word_tokenize)
-    dataloader = DataLoader(dataset, batch_size=2, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=32, collate_fn=collate_fn)
 
     input_dim = len(glove_embeddings)
     model_dim = 100
