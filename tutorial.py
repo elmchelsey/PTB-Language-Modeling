@@ -14,6 +14,7 @@ from collections import defaultdict
 from datasets import load_dataset
 import torch.nn.functional as F
 import argparse
+import csv
 
 nltk.download('punkt_tab')
 
@@ -660,7 +661,7 @@ def collate_fn(batch):
 
 def calculate_and_save_perplexities(model, test_dataloader, device, output_file):
     """
-    Calculates perplexity for each sentence and saves to file.
+    Calculates perplexity for each sentence and saves to CSV file.
     
     Args:
         model: The transformer model
@@ -669,10 +670,10 @@ def calculate_and_save_perplexities(model, test_dataloader, device, output_file)
         output_file: Path to output file
     """
     model.eval()
-    criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='none')  # Changed to 'none' to get per-token loss
+    criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='none')
     
-    with open(output_file, 'w') as f:
-        f.write("sentence_idx\tperplexity\n")  # Header
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.writer(f)
         
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_dataloader):
@@ -711,8 +712,8 @@ def calculate_and_save_perplexities(model, test_dataloader, device, output_file)
                         # Calculate global sentence index
                         sentence_idx = batch_idx * test_dataloader.batch_size + i
                         
-                        # Write to file
-                        f.write(f"{sentence_idx}\t{perplexity:.4f}\n")
+                        # Write to CSV file
+                        writer.writerow([sentence_idx, f"{perplexity:.4f}"])
 
 # Add this near the top of the file, after imports
 def parse_args():
