@@ -12,6 +12,7 @@ import nltk
 from nltk.tokenize import word_tokenize
 from collections import defaultdict
 from datasets import load_dataset
+import torch.nn.functional as F
 
 nltk.download('punkt_tab')
 
@@ -158,8 +159,8 @@ class LayerNormalization(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
-        self.alpha = nn.Parameter(torch.ones(d_model)) # multiplied to get normalized output
-        self.bias = nn.Parameter(torch.zeros(d_model)) # added to get normalized output
+        self.alpha = nn.Parameter(torch.ones(d_model))
+        self.bias = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, x):
         mean = x.mean(dim = -1, keepdim=True)
@@ -281,7 +282,7 @@ class ResidualConnection(nn.Module):
     def __init__(self, d_model:int, dropout:float):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.norm = LayerNormalization()
+        self.norm = LayerNormalization(d_model)
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
@@ -299,7 +300,8 @@ class EncoderBlock(nn.Module):
         super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
-        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(2)])
+        d_model = self_attention_block.d_model
+        self.residual_connections = nn.ModuleList([ResidualConnection(d_model, dropout) for _ in range(2)])
 
     def forward(self, x, src_mask):
         # normalize before + after applying self attention block
@@ -319,7 +321,9 @@ class Encoder(nn.Module):
     def __init__(self, layers:nn.ModuleList):
         super().__init__()
         self.layers = layers
-        self.norm = LayerNormalization()
+        # Get d_model from the first layer's self_attention_block
+        d_model = self.layers[0].self_attention_block.d_model
+        self.norm = LayerNormalization(d_model)  # Pass d_model to LayerNormalization
 
     def forward(self, x, mask):
         for layer in self.layers:
@@ -341,7 +345,8 @@ class DecoderBlock(nn.Module):
         self.self_attention_block = self_attention_block
         self.cross_attention_block = cross_attention_block
         self.feed_forward_block = feed_forward_block
-        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(3)])
+        d_model = self_attention_block.d_model
+        self.residual_connections = nn.ModuleList([ResidualConnection(d_model, dropout) for _ in range(3)])
 
     def forward(self, x, enc_output, src_mask, tgt_mask):
         x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, tgt_mask))
@@ -359,7 +364,9 @@ class Decoder(nn.Module):
     def __init__(self, layers:nn.ModuleList):
         super().__init__()
         self.layers = layers
-        self.norm = LayerNormalization()
+        # Get d_model from the first layer's self_attention_block
+        d_model = self.layers[0].self_attention_block.d_model
+        self.norm = LayerNormalization(d_model)  # Pass d_model to LayerNormalization
 
     def forward(self, x, enc_output, src_mask, tgt_mask):
         for layer in self.layers:
@@ -380,7 +387,7 @@ class LinearLayer(nn.Module):
 
     def forward(self, x):
         # (batch, seq_len, d_model) -> (batch, seq_len, vocab_size)
-        return self.log_softmax(self.linear(x), dim=-1)
+        return F.log_softmax(self.linear(x), dim=-1)
     
 """
 Transformer
@@ -436,8 +443,9 @@ def build_transformer(src_vocab_size:int, tgt_vocab_size:int, d_model:int = 512,
     tgt_embedding = InputEmbedding(d_model, tgt_vocab_size)
 
     #Create positional encoding layers
-    src_pos = PositionalEncoding(d_model, dropout)
-    tgt_pos = PositionalEncoding(d_model, dropout)
+    max_seq_length = 5000
+    src_pos = PositionalEncoding(d_model, max_seq_length, dropout)
+    tgt_pos = PositionalEncoding(d_model, max_seq_length, dropout)
 
     #Create encoder blocks
     encoder_blocks = []
@@ -503,7 +511,7 @@ def train_transformer(model, train_dataloader, val_dataloader, num_epochs, learn
             
             # Create masks
             src_mask = (src != 0).unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1, src_len)
-            tgt_mask = generate_square_subsequent_mask(tgt.size(1)).to(device)
+            tgt_mask = generate_square_subsequent_mask(tgt[:, :-1].size(1)).to(device)
             
             # Forward pass
             optimizer.zero_grad()
