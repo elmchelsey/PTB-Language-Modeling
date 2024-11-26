@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import math
-import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import AdamW
@@ -16,70 +15,18 @@ import torch.nn.functional as F
 import argparse
 import csv
 import os
+from typing import Dict, List
 
-nltk.download("punkt_tab")
+try:
+    nltk.download('punkt')
+except:
+    pass
 
-ptb = load_dataset("ptb-text-only/ptb_text_only", trust_remote_code=True)
+ptb = load_dataset('ptb-text-only/ptb_text_only', trust_remote_code=True)
 
-train = ptb["train"]
-val = ptb["validation"]
-test = ptb["test"]
-
-"""
-Load GloVe Embeddings
-    Loads the GloVe embeddings from a file into a dictionary.
-    Args:
-        glove_file: The path to the GloVe embeddings file.
-    Returns:
-        A dictionary mapping words to their GloVe embeddings.
-"""
-
-
-def load_glove_embeddings(glove_file):
-    glove_embeddings = {}
-
-    with open(glove_file, "r") as f:
-        for line in f:
-            values = line.strip().split()
-            word = values[0]
-            vector = np.array(values[1:], dtype=np.float32)
-            glove_embeddings[word] = vector
-
-    return glove_embeddings
-
-
-"""
-Preprocess Text
-    Tokenizes the text, removes stopwords, and replaces unknown words with the UNK token.
-    Args:
-        text: The text to preprocess.
-        glove_embeddings: A dictionary mapping words to their GloVe embeddings.
-        unknown_token: The token to replace unknown words with.
-        stopwords: A list of stopwords to remove from the text.
-    Returns:
-        A list of embeddings for the words in the text.
-"""
-
-
-def preprocess_text(text, glove_embeddings, unknown_token="UNK", stopwords=None):
-    tokens = word_tokenize(text.lower())
-
-    if stopwords is not None:
-        tokens = [word for word in tokens if word not in stopwords]
-
-    embedding_sequence = []
-    for token in tokens:
-        if token in glove_embeddings:
-            embedding_sequence.append(glove_embeddings[token])
-        else:
-            embedding_sequence.append(
-                glove_embeddings.get(
-                    unknown_token, np.zeros_like(next(iter(glove_embeddings.values())))
-                )
-            )
-
-    return embedding_sequence
-
+train = ptb['train']
+val = ptb['validation']
+test = ptb['test']
 
 """
 Build Vocabulary
@@ -91,9 +38,7 @@ Build Vocabulary
     Returns:
         A dictionary mapping each unique word to a unique integer.
 """
-
-
-def build_vocab(sentences, special_tokens=["<PAD>", "<UNK>"]):
+def build_vocab(sentences, special_tokens=['<PAD>', '<UNK>']):
 
     sentence_count = 0
     sentence_lengths = []
@@ -119,10 +64,8 @@ Input Embedding
         d_model: The dimension of the model.
         vocab_size: The size of the vocabulary.
 """
-
-
 class InputEmbedding(nn.Module):
-    def __init__(self, d_model: int, vocab_size: int):
+    def __init__(self, d_model:int, vocab_size:int):
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
@@ -130,9 +73,8 @@ class InputEmbedding(nn.Module):
 
     def forward(self, x):
         return self.embedding(x) * math.sqrt(self.d_model)  # scale the embeddings by
-        # the square root of the model dimension
-
-
+                                                            # the square root of the model dimension
+    
 """
 Positional Encoding
     Computes a matrix of positional encodings based on the maximum sequence length
@@ -142,10 +84,8 @@ Positional Encoding
         seq_len: The maximum sequence length.
         dropout: The dropout rate.
 """
-
-
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, seq_len: int, dropout: float):
+    def __init__(self, d_model:int, seq_len:int, dropout:float):
         super().__init__()
         self.d_model = d_model
         self.seq_len = seq_len  # max sequence length (within training data)
@@ -156,9 +96,7 @@ class PositionalEncoding(nn.Module):
 
         # Create a vector of shape (seq_len, 1)
         position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
-        )
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
 
         # Apply the sin to even indices
         pe[:, 0::2] = torch.sin(position * div_term)
@@ -166,15 +104,14 @@ class PositionalEncoding(nn.Module):
         # Apply the cos to odd indices
         pe[:, 1::2] = torch.cos(position * div_term)
 
-        pe = pe.unsqueeze(0)  # (1, seq_len, d_model)
+        pe = pe.unsqueeze(0) # (1, seq_len, d_model)
 
-        self.register_buffer("pe", pe)  # register the positional encoding as a buffer
+        self.register_buffer('pe', pe)     # register the positional encoding as a buffer
 
     # add the positional encoding to each token in the input sequence
     def forward(self, x):
-        x = x + (self.pe[:, : x.size(1), :]).requires_grad_(False)
+        x = x + (self.pe[:, :x.size(1), :]).requires_grad_(False)
         return self.dropout(x)
-
 
 """
 Layer Normalization
@@ -183,10 +120,8 @@ Layer Normalization
         d_model: The dimension of the model.
         eps: A small constant to prevent division by zero.
 """
-
-
 class LayerNormalization(nn.Module):
-    def __init__(self, d_model: int, eps: float = 1e-6):
+    def __init__(self, d_model:int, eps:float=1e-6):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
@@ -194,10 +129,10 @@ class LayerNormalization(nn.Module):
         self.bias = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, x):
-        mean = x.mean(dim=-1, keepdim=True)
-        std = x.std(dim=-1, keepdim=True)
+        mean = x.mean(dim = -1, keepdim=True)
+        std = x.std(dim = -1, keepdim=True)
         return self.alpha * (x - mean) / (std + self.eps) + self.bias
-
+    
 
 """
 Feed Forward
@@ -212,20 +147,17 @@ Feed Forward
         d_ff: The dimension of the feed-forward network.
         dropout: The dropout rate.
 """
-
-
 class FeedForward(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, dropout: float):
+    def __init__(self, d_model:int, d_ff:int, dropout:float):
         super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_ff)  # W1 and B1
+        self.linear_1 = nn.Linear(d_model, d_ff)    # W1 and B1
         self.relu = nn.ReLU()
-        self.linear_2 = nn.Linear(d_ff, d_model)  # W2 and B2
+        self.linear_2 = nn.Linear(d_ff, d_model)    # W2 and B2
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         # (batch_size, seq_len, d_model) -> (batch_size, seq_len, d_ff) -> (batch_size, seq_len, d_model)
         return self.linear_2(self.dropout(self.relu(self.linear_1(x))))
-
 
 """
 Multi Head Attention
@@ -241,17 +173,15 @@ Multi Head Attention
         h: The number of heads.
         dropout: The dropout rate.
 """
-
-
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, d_model: int, h: int, dropout: float):
+    def __init__(self, d_model:int, h:int, dropout:float):
         super().__init__()
         self.d_model = d_model
         self.h = h
-        assert d_model % h == 0, "d_model must be divisible by h"
+        assert d_model % h == 0, 'd_model must be divisible by h'
         self.d_k = d_model // h
-
+        
         self.w_q = nn.Linear(d_model, d_model)
         self.w_k = nn.Linear(d_model, d_model)
         self.w_v = nn.Linear(d_model, d_model)
@@ -261,52 +191,49 @@ class MultiHeadAttention(nn.Module):
     @staticmethod
     def attention(query, key, value, mask, dropout: nn.Dropout):
         d_k = query.shape[-1]
-
+        
         # Compute attention scores
         attention_scores = (query @ key.transpose(-2, -1)) / math.sqrt(d_k)
-
+        
         if mask is not None:
             # Adjust mask shape to match attention_scores
             if mask.dim() == 3:
                 # If mask is (batch_size, seq_len, seq_len)
                 mask = mask.unsqueeze(1)
-
+            
             # Ensure mask matches the attention scores size exactly
             if mask.size(-1) != attention_scores.size(-1):
                 # Truncate or pad mask if necessary
-                mask = mask[
-                    ..., : attention_scores.size(-1), : attention_scores.size(-1)
-                ]
-
-            attention_scores = attention_scores.masked_fill(~mask, float("-inf"))
-
+                mask = mask[..., :attention_scores.size(-1), :attention_scores.size(-1)]
+            
+            attention_scores = attention_scores.masked_fill(~mask, float('-inf'))
+        
         attention_scores = attention_scores.softmax(dim=-1)
-
+        
         if dropout is not None:
             attention_scores = dropout(attention_scores)
-
+        
         return (attention_scores @ value), attention_scores
 
     def forward(self, q, k, v, mask=None):
         batch_size = q.size(0)
-
+        
         # Linear transformations
         query = self.w_q(q)
         key = self.w_k(k)
         value = self.w_v(v)
-
+        
         # Reshape for multi-head attention
         query = query.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
         key = key.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
         value = value.view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
-
+        
         # Apply attention
         x, self.attention_scores = self.attention(query, key, value, mask, self.dropout)
-
+        
         # Reshape and apply final linear transformation
         x = x.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
         return self.w_o(x)
-
 
 """
 Residual Connection
@@ -317,17 +244,14 @@ Residual Connection
         d_model: The dimension of the model.
         dropout: The dropout rate.
 """
-
-
 class ResidualConnection(nn.Module):
-    def __init__(self, d_model: int, dropout: float):
+    def __init__(self, d_model:int, dropout:float):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         self.norm = LayerNormalization(d_model)
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
-
 
 """
 Encoder Block
@@ -336,45 +260,31 @@ Encoder Block
         self_attention_block: The self-attention block.
         feed_forward_block: The feed-forward block.
         dropout: The dropout rate.
-"""
-
-
+""" 
 class EncoderBlock(nn.Module):
-    def __init__(
-        self,
-        self_attention_block: MultiHeadAttention,
-        feed_forward_block: FeedForward,
-        dropout: float,
-    ):
+    def __init__(self, self_attention_block:MultiHeadAttention, feed_forward_block:FeedForward, dropout:float):
         super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
         d_model = self_attention_block.d_model
-        self.residual_connections = nn.ModuleList(
-            [ResidualConnection(d_model, dropout) for _ in range(2)]
-        )
+        self.residual_connections = nn.ModuleList([ResidualConnection(d_model, dropout) for _ in range(2)])
 
     def forward(self, x, src_mask):
         # normalize before + after applying self attention block
-        x = self.residual_connections[0](
-            x, lambda x: self.self_attention_block(x, x, x, src_mask)
-        )
+        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask))
 
         # normalize before + after applying feed forward block
         x = self.residual_connections[1](x, self.feed_forward_block)
         return x
-
-
+    
 """
 Encoder
     Implements the encoder of the transformer model.
     Args:
         layers: A list of encoder blocks.
 """
-
-
 class Encoder(nn.Module):
-    def __init__(self, layers: nn.ModuleList):
+    def __init__(self, layers:nn.ModuleList):
         super().__init__()
         self.layers = layers
         # Get d_model from the first layer's self_attention_block
@@ -385,8 +295,7 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
-
-
+    
 """
 Linear Layer
     Projects the encoder output into vocabulary space.
@@ -394,17 +303,14 @@ Linear Layer
         d_model: The dimension of the model.
         vocab_size: The size of the vocabulary.
 """
-
-
 class LinearLayer(nn.Module):
     def __init__(self, d_model: int, vocab_size: int):
         super().__init__()
         self.proj = nn.Linear(d_model, vocab_size)
-
+    
     def forward(self, x):
         # (batch_size, seq_len, d_model) -> (batch_size, seq_len, vocab_size)
         return self.proj(x)
-
 
 """
 Encoder-Only Transformer
@@ -415,16 +321,8 @@ Encoder-Only Transformer
         src_pos: The source positional encoding layer
         linear: The linear layer
 """
-
-
 class EncoderOnlyTransformer(nn.Module):
-    def __init__(
-        self,
-        encoder: Encoder,
-        src_embed: InputEmbedding,
-        src_pos: PositionalEncoding,
-        linear: LinearLayer,
-    ):
+    def __init__(self, encoder:Encoder, src_embed:InputEmbedding, src_pos:PositionalEncoding, linear:LinearLayer):
         super().__init__()
         self.encoder = encoder
         self.src_embed = src_embed
@@ -435,13 +333,12 @@ class EncoderOnlyTransformer(nn.Module):
         # Embed and add positional encoding
         src = self.src_embed(src)
         src = self.src_pos(src)
-
+        
         # Pass through encoder
         enc_output = self.encoder(src, mask)
-
+        
         # Project to vocabulary space
         return self.linear(enc_output)
-
 
 """
 Builds the encoder-only transformer model.
@@ -453,16 +350,7 @@ Builds the encoder-only transformer model.
         d_ff: The dimension of the feed-forward network
         dropout: The dropout rate
 """
-
-
-def build_encoder_transformer(
-    vocab_size: int,
-    d_model: int = 512,
-    h: int = 8,
-    N: int = 6,
-    d_ff: int = 2048,
-    dropout: float = 0.1,
-):
+def build_encoder_transformer(vocab_size:int, d_model:int = 512, h:int = 8, N:int = 6, d_ff:int = 2048, dropout:float = 0.1):
     # Create embedding layers
     embedding = InputEmbedding(d_model, vocab_size)
 
@@ -475,9 +363,7 @@ def build_encoder_transformer(
     for _ in range(N):
         encoder_self_attention_block = MultiHeadAttention(d_model, h, dropout)
         encoder_feed_forward_block = FeedForward(d_model, d_ff, dropout)
-        encoder_block = EncoderBlock(
-            encoder_self_attention_block, encoder_feed_forward_block, dropout
-        )
+        encoder_block = EncoderBlock(encoder_self_attention_block, encoder_feed_forward_block, dropout)
         encoder_blocks.append(encoder_block)
 
     # Create the encoder
@@ -496,69 +382,62 @@ def build_encoder_transformer(
 
     return transformer
 
-
-def train_encoder_transformer(
-    model, train_dataloader, val_dataloader, num_epochs, learning_rate, device
-):
+def train_encoder_transformer(model, train_dataloader, val_dataloader, num_epochs, learning_rate, device):
     """
     Trains the encoder-only transformer model.
     """
     model = model.to(device)
     optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), eps=1e-9)
     criterion = nn.CrossEntropyLoss(ignore_index=0)
-
+    
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
-
+        
         for batch_idx, batch in enumerate(train_dataloader):
-            src = batch["source"].to(device)
-            tgt = batch["target"].to(device)
-
+            src = batch['source'].to(device)
+            tgt = batch['target'].to(device)
+            
             # Create masked attention mask
             mask = generate_target_mask(src, device)
-
+            
             # Forward pass
             optimizer.zero_grad()
             output = model(src, mask)
-
+            
             # Calculate loss
-            loss = criterion(
-                output.contiguous().view(-1, output.size(-1)), tgt.contiguous().view(-1)
-            )
-
+            loss = criterion(output.contiguous().view(-1, output.size(-1)), 
+                           tgt.contiguous().view(-1))
+            
             # Backward pass
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-
+            
             total_loss += loss.item()
-
+            
             if batch_idx % 100 == 0:
-                print(f"Epoch: {epoch+1}, Batch: {batch_idx}, Loss: {loss.item():.4f}")
-
+                print(f'Epoch: {epoch+1}, Batch: {batch_idx}, Loss: {loss.item():.4f}')
+        
         avg_loss = total_loss / len(train_dataloader)
-        print(f"Epoch: {epoch+1}, Average Loss: {avg_loss:.4f}")
-
+        print(f'Epoch: {epoch+1}, Average Loss: {avg_loss:.4f}')
+        
         # Validation
         model.eval()
         val_loss = 0
         with torch.no_grad():
             for batch in val_dataloader:
-                src = batch["source"].to(device)
-                tgt = batch["target"].to(device)
+                src = batch['source'].to(device)
+                tgt = batch['target'].to(device)
                 mask = generate_target_mask(src, device)
-
+                
                 output = model(src, mask)
-                loss = criterion(
-                    output.contiguous().view(-1, output.size(-1)),
-                    tgt.contiguous().view(-1),
-                )
+                loss = criterion(output.contiguous().view(-1, output.size(-1)),
+                               tgt.contiguous().view(-1))
                 val_loss += loss.item()
-
+        
         avg_val_loss = val_loss / len(val_dataloader)
-        print(f"Validation Loss: {avg_val_loss:.4f}")
-
+        print(f'Validation Loss: {avg_val_loss:.4f}')
 
 def generate_target_mask(tgt_input, device):
     """
@@ -570,80 +449,68 @@ def generate_target_mask(tgt_input, device):
         Combined mask tensor of shape (batch_size, seq_len, seq_len)
     """
     batch_size, seq_len = tgt_input.size()
-
+    
     # Create padding mask (batch_size, seq_len, seq_len)
     padding_mask = (tgt_input != 0).unsqueeze(1).expand(batch_size, seq_len, seq_len)
-
+    
     # Create causal mask (seq_len, seq_len)
-    causal_mask = torch.triu(
-        torch.ones(seq_len, seq_len, device=device), diagonal=1
-    ).bool()
+    causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1).bool()
     causal_mask = causal_mask.expand(batch_size, seq_len, seq_len)
-
+    
     # Combine masks
-    final_mask = ~causal_mask & padding_mask
-
+    final_mask = (~causal_mask & padding_mask)
+    
     return final_mask.to(device)
-
-
-def generate_square_subsequent_mask(sz):
-    """
-    Generate a square mask for the sequence. The mask ensures that the
-    prediction for position i can depend only on known outputs at positions
-    less than i.
-    """
-    mask = torch.triu(torch.ones((sz, sz)), diagonal=1).type(torch.bool)
-    return ~mask
-
 
 class PTBDataset(Dataset):
     def __init__(self, data, vocab, max_len=128):
         self.data = data
         self.vocab = vocab
         self.max_len = max_len
-
+        
     def __len__(self):
         return len(self.data)
-
+    
     def __getitem__(self, idx):
-        sentence = self.data[idx]["sentence"]
+        sentence = self.data[idx]['sentence']
         tokens = word_tokenize(sentence.lower())
-
+        
         # Convert tokens to indices
-        indices = [self.vocab.get(token, self.vocab["<UNK>"]) for token in tokens]
-
+        indices = [self.vocab.get(token, self.vocab['<UNK>']) for token in tokens]
+        
         # Add start and end tokens
-        indices = [self.vocab["<START>"]] + indices + [self.vocab["<END>"]]
-
+        indices = [self.vocab['<START>']] + indices + [self.vocab['<END>']]
+        
         # Truncate if too long
         if len(indices) > self.max_len:
-            indices = indices[: self.max_len]
-
+            indices = indices[:self.max_len]
+            
         return {
-            "source": torch.tensor(indices[:-1]),  # Input sequence
-            "target": torch.tensor(indices[1:]),  # Target sequence (shifted by 1)
+            'source': torch.tensor(indices[:-1]),  # Input sequence
+            'target': torch.tensor(indices[1:])    # Target sequence (shifted by 1)
         }
-
 
 def collate_fn(batch):
     # Sort by source sequence length (descending)
-    batch.sort(key=lambda x: len(x["source"]), reverse=True)
-
+    batch.sort(key=lambda x: len(x['source']), reverse=True)
+    
     # Separate source and target sequences
-    src_sequences = [x["source"] for x in batch]
-    tgt_sequences = [x["target"] for x in batch]
-
+    src_sequences = [x['source'] for x in batch]
+    tgt_sequences = [x['target'] for x in batch]
+    
     # Pad sequences
     src_padded = pad_sequence(src_sequences, batch_first=True, padding_value=0)
     tgt_padded = pad_sequence(tgt_sequences, batch_first=True, padding_value=0)
-
-    return {"source": src_padded, "target": tgt_padded}
-
+    
+    return {
+        'source': src_padded,
+        'target': tgt_padded
+    }
 
 def calculate_and_save_perplexities(model, test_dataloader, device, output_file):
     """
     Calculates per-token perplexity for each sentence and saves to CSV file.
-
+    
     Args:
         model: The transformer model
         test_dataloader: DataLoader for test data
@@ -651,127 +518,85 @@ def calculate_and_save_perplexities(model, test_dataloader, device, output_file)
         output_file: Path to output CSV file
     """
     model.eval()
-    criterion = nn.CrossEntropyLoss(ignore_index=0, reduction="none")
-
-    with open(output_file, "w", newline="") as f:
+    criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='none')
+    
+    with open(output_file, 'w', newline='') as f:
         writer = csv.writer(f)
         # Write header
-        writer.writerow(["ID", "ppl"])
-
+        writer.writerow(['ID', 'ppl'])
+        
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_dataloader):
-                src = batch["source"].to(device)
-                tgt = batch["target"].to(device)
-
+                src = batch['source'].to(device)
+                tgt = batch['target'].to(device)
+                
                 # Create mask for the source sequence
                 mask = generate_target_mask(src, device)
-
+                
                 # Forward pass through the encoder-only model
                 output = model(src, mask)
-
+                
                 # Calculate loss for each token
-                loss = criterion(
-                    output.contiguous().view(-1, output.size(-1)),
-                    tgt.contiguous().view(-1),
-                )
-
+                loss = criterion(output.contiguous().view(-1, output.size(-1)),
+                               tgt.contiguous().view(-1))
+                
                 # Reshape loss back to (batch_size, seq_len)
                 loss = loss.view(tgt.shape)
-
+                
                 # Calculate perplexity for each sentence in the batch
                 for i in range(src.size(0)):
                     # Get mask for non-padding tokens
-                    non_pad_mask = tgt[i] != 0
-
+                    non_pad_mask = (tgt[i] != 0)
+                    
                     # Get loss for this sentence (only for non-padding tokens)
                     sentence_loss = loss[i][non_pad_mask]
-
+                    
                     # Calculate perplexity using the mean loss
                     if len(sentence_loss) > 0:
                         avg_loss = sentence_loss.mean().item()
                         perplexity = math.exp(avg_loss)
-
+                        
                         # Calculate sentence index
                         sentence_idx = batch_idx * test_dataloader.batch_size + i
-
+                        
                         # Write to CSV file with exactly two decimal places
                         writer.writerow([sentence_idx, f"{perplexity:.2f}"])
-                        print(
-                            f"Sentence {sentence_idx} has perplexity {perplexity:.2f}"
-                        )
-                        print("Document perplexity: ", math.exp(avg_loss))
 
-
-# Add this near the top of the file, after imports
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Train a Transformer model on PTB dataset"
-    )
-
-    # Model parameters
-    parser.add_argument(
-        "--d_model", type=int, default=512, help="Dimension of the model"
-    )
-    parser.add_argument("--h", type=int, default=4, help="Number of attention heads")
-    parser.add_argument(
-        "--N", type=int, default=1, help="Number of encoder/decoder layers"
-    )
-    parser.add_argument(
-        "--d_ff", type=int, default=2048, help="Dimension of feed forward network"
-    )
-    parser.add_argument("--dropout", type=float, default=0.5, help="Dropout rate")
-
-    # Training parameters
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=2, help="Number of epochs")
-    parser.add_argument(
-        "--learning_rate", type=float, default=0.0001, help="Learning rate"
-    )
-    parser.add_argument(
-        "--max_len", type=int, default=128, help="Maximum sequence length"
-    )
-
-    # Other parameters
-    parser.add_argument(
-        "--output_file",
-        type=str,
-        default="sentence_perplexities_LR0.005.csv",
-        help="Output file for perplexities",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to use (cuda/cpu)",
-    )
-
-    return parser.parse_args()
-
-
-# Replace the main execution code at the bottom with this:
 def main():
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3,4,5"
-
-    args = parse_args()
-
+    parser = argparse.ArgumentParser(description='Train a Transformer model on PTB dataset')
+    
+    # Model parameters
+    parser.add_argument('output_file', type=str, help='Output file path for perplexities')
+    parser.add_argument('--d_model', type=int, default=512, help='Dimension of the model')
+    parser.add_argument('--h', type=int, default=8, help='Number of attention heads')
+    parser.add_argument('--N', type=int, default=6, help='Number of encoder/decoder layers')
+    parser.add_argument('--d_ff', type=int, default=2048, help='Dimension of feed forward network')
+    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    
+    # Training parameters
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--num_epochs', type=int, default=2, help='Number of epochs')
+    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
+    parser.add_argument('--max_len', type=int, default=128, help='Maximum sequence length')
+    
+    args = parser.parse_args()
+    
+    # Set CUDA device if available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
     # Prepare the data
-    special_tokens = ["<PAD>", "<UNK>", "<START>", "<END>"]
-    vocab = build_vocab(
-        [item["sentence"] for item in train], special_tokens=special_tokens
-    )
-
+    special_tokens = ['<PAD>', '<UNK>', '<START>', '<END>']
+    vocab = build_vocab([item['sentence'] for item in train], special_tokens=special_tokens)
+    
     # Create datasets and dataloaders
     train_dataset = PTBDataset(train, vocab, max_len=args.max_len)
     val_dataset = PTBDataset(val, vocab, max_len=args.max_len)
-
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
-    )
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
-    )
-
+    
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, 
+                                shuffle=True, collate_fn=collate_fn)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, 
+                              shuffle=False, collate_fn=collate_fn)
+    
     # Initialize the encoder-only model
     vocab_size = len(vocab)
     model = build_encoder_transformer(
@@ -780,29 +605,18 @@ def main():
         h=args.h,
         N=args.N,
         d_ff=args.d_ff,
-        dropout=args.dropout,
+        dropout=args.dropout
     )
-
+    
     # Train the model
-    device = torch.device(args.device)
-    train_encoder_transformer(
-        model,
-        train_dataloader,
-        val_dataloader,
-        args.num_epochs,
-        args.learning_rate,
-        device,
-    )
-
+    train_encoder_transformer(model, train_dataloader, val_dataloader, 
+                            args.num_epochs, args.learning_rate, device)
+    
     # Calculate and save perplexities
     test_dataset = PTBDataset(test, vocab, max_len=args.max_len)
-    test_dataloader = DataLoader(
-        test_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn
-    )
-
-    calculate_and_save_perplexities(model, train_dataloader, device, args.output_file)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, 
+                               shuffle=False, collate_fn=collate_fn)
     calculate_and_save_perplexities(model, test_dataloader, device, args.output_file)
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
