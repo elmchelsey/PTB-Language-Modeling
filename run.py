@@ -565,7 +565,7 @@ def calculate_and_save_perplexities(model, test_dataloader, device, output_file)
 def main():
     parser = argparse.ArgumentParser(description='Train a Transformer model on PTB dataset')
     
-    # Model parameters
+    # Model parames
     parser.add_argument('output_file', type=str, help='Output file path for perplexities')
     parser.add_argument('--d_model', type=int, default=512, help='Dimension of the model')
     parser.add_argument('--h', type=int, default=8, help='Number of attention heads')
@@ -573,7 +573,7 @@ def main():
     parser.add_argument('--d_ff', type=int, default=2048, help='Dimension of feed forward network')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
     
-    # Training parameters
+    # Training params
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=2, help='Number of epochs')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
@@ -584,7 +584,7 @@ def main():
     # Set CUDA device if available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Prepare the data
+    # Prep data
     special_tokens = ['<PAD>', '<UNK>', '<START>', '<END>']
     vocab = build_vocab([item['sentence'] for item in train], special_tokens=special_tokens)
     
