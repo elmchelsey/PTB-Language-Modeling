@@ -13,6 +13,7 @@ from collections import defaultdict
 from datasets import load_dataset
 import torch.nn.functional as F
 import argparse
+import wandb
 import csv
 import os
 from typing import Dict, List
@@ -578,8 +579,17 @@ def main():
     parser.add_argument('--num_epochs', type=int, default=2, help='Number of epochs')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--max_len', type=int, default=128, help='Maximum sequence length')
+
+
     
     args = parser.parse_args()
+
+    hyperparameters = {
+        "d_model":args.d_model,
+        "h":args.h
+        
+    }
+    
     
     # Set CUDA device if available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
