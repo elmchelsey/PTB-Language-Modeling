@@ -16,14 +16,14 @@ This project implements an **Encoder-Only Transformer** model for natural langua
 This model uses the Penn Treebank (PTB) Text-Only dataset, which is loaded via the datasets library, and which contains a train, validation, and test dataset.
 
 ## Features
-Vocabulary Building: Automatically constructs a vocabulary from sentences.
-Input Embedding: Embeds tokens and scales by the model's dimension.
-Positional Encoding: Adds positional information to embeddings.
-Multi-Head Attention: Implements scaled dot-product attention across multiple heads.
-Feed-Forward Layers: Two-layer MLP with ReLU activation and dropout.
-Residual Connections: Includes normalization and skip connections.
-Encoder Block: Combines self-attention and feed-forward layers.
-Linear Projection: Maps the encoder's output to vocabulary space.
+**Vocabulary Building**: Automatically constructs a vocabulary from sentences.
+**Input Embedding**: Embeds tokens and scales by the model's dimension.
+**Positional Encoding**: Adds positional information to embeddings.
+**Multi-Head Attention**: Implements scaled dot-product attention across multiple heads.
+**Feed-Forward Layers**: Two-layer MLP with ReLU activation and dropout.
+**Residual Connections**: Includes normalization and skip connections.
+**Encoder Block**: Combines self-attention and feed-forward layers.
+**Linear Projection**: Maps the encoder's output to vocabulary space.
 
 ## The Model 
 
